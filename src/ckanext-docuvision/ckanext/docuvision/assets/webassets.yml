@@ -1,0 +1,14 @@
+# docuvision-js:
+#   filter: rjsmin
+#   output: ckanext-docuvision/%(version)s-docuvision.js
+#   contents:
+#     - js/docuvision.js
+#   extra:
+#     preload:
+#       - base/main
+
+# docuvision-css:
+#   filter: cssrewrite
+#   output: ckanext-docuvision/%(version)s-docuvision.css
+#   contents:
+#     - css/docuvision.css
