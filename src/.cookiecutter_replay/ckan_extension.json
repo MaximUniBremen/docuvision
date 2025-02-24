@@ -1,0 +1,31 @@
+{
+  "cookiecutter": {
+    "project": "ckanext-docuvision",
+    "keywords": "CKAN",
+    "description": "",
+    "author": "sample",
+    "author_email": "sample",
+    "github_user_name": "sample",
+    "project_shortname": "docuvision",
+    "plugin_class_name": "DocuvisionPlugin",
+    "include_examples": "0",
+    "ckan_version": "2.11",
+    "_source": "cli",
+    "_template": "/srv/app/src/ckan/contrib/cookiecutter/ckan_extension",
+    "_output_dir": "/srv/app/src_extensions",
+    "_repo_dir": "/srv/app/src/ckan/contrib/cookiecutter/ckan_extension",
+    "_checkout": null
+  },
+  "_cookiecutter": {
+    "project": "ckanext-docuvision",
+    "keywords": "CKAN",
+    "description": "",
+    "author": "sample",
+    "author_email": "sample",
+    "github_user_name": "sample",
+    "project_shortname": "docuvision",
+    "plugin_class_name": "DocuvisionPlugin",
+    "include_examples": 0,
+    "ckan_version": "2.11"
+  }
+}
