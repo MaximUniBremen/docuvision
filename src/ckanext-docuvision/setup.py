@@ -31,8 +31,9 @@ setup(
     install_requires=[
         'ckan>=2.11',         # Tested, or higher if you plan to support CKAN 2.12+
         'PyPDF2>=3.0.0',      # For PDF text extraction
-        "pillow>=9.0.0",      # For advanced OCR image processing if needed
+        'pillow>=9.0.0',      # For advanced OCR image processing if needed
         'pytesseract>=0.3.8', # For OCR functionality
+        'flask_sqlalchemy>=3.1.1', 'sqlalchemy>=2.0.38', 'psycopg2-binary>=2.9.10' # For Postgres database functionality
     ],
 
     # CKAN plugin entry point
