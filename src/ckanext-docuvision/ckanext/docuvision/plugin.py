@@ -1,9 +1,12 @@
 import logging
 import json
+import mimetypes
+import os
 from datetime import datetime
 
 import ckan.plugins as plugins
 import ckan.plugins.toolkit as toolkit
+import requests
 from ckan.lib.uploader import ResourceUpload
 import PyPDF2
 
@@ -192,47 +195,118 @@ class DocuvisionPlugin(plugins.SingletonPlugin):
 
     def _store_text_in_json(self, resource_id, text):
         """
-        Save the extracted text in resource extras as a JSON object.
+        Saves the extracted text in resource extras as a JSON object.
         """
         try:
-            # Get CKAN actions for package_show and package_update
+            # Get CKAN actions
+            resource_show = toolkit.get_action('resource_show')
             package_show = toolkit.get_action('package_show')
             package_update = toolkit.get_action('package_update')
 
-            # Fetch the current state of the dataset
-            dataset = package_show({'ignore_auth': True}, {'id': 'skoda'})
+            # Use the resource ID to find its dataset
+            resource = resource_show({'ignore_auth': True}, {'id': resource_id})
+            dataset_id = resource['package_id']
 
-            # Create 'extras' field in the JSON if it doesn't exist yet
+            filename = dataset_id + resource_id
+
+            # Fetch the current dataset object
+            dataset = package_show({'ignore_auth': True}, {'id': dataset_id})
+
+            # Ensure 'extras' exists
             if "extras" not in dataset:
                 dataset["extras"] = []
 
-            # Convert the resource's 'extras' (a list of dicts) into a dictionary for easier manipulation
-            extras_dict = {}
-            for extra_item in dataset.get('extras', []):
-                extras_dict[extra_item['key']] = extra_item['value']
+            # Convert extras to a dictionary
+            extras_dict = {item['key']: item['value'] for item in dataset['extras']}
 
-            # Build JSON structure to store extracted text and metadata
+            # Save each text extraction to a file and upload it to CKAN
+            file_resources = {}
+            if text:
+                file_path = self._store_text_as_txt(text, filename)
+                log.info(file_path)
+                if file_path:
+                    uploaded_resource_id = self._upload_to_ckan(file_path, dataset_id)
+                    if uploaded_resource_id:
+                        file_resources[filename] = uploaded_resource_id
+
+            # Build metadata as JSON structure, currently only has text length and extraction date
             text_data = {
-                'extracted_text': text,
-                'extraction_date': datetime.utcnow().isoformat(),
-                'version': '1.0'
+                'text_length': str(len(text)),
+                'extraction_date': datetime.utcnow().isoformat()
             }
 
-            # Put the new data under a custom key
+            # Save metadata in 'extras'
             extras_dict['extracted_text_data'] = json.dumps(text_data)
 
-            # Convert dictionary back into the list-of-dicts format CKAN expects
-            new_extras_list = []
-            for k, v in extras_dict.items():
-                new_extras_list.append({'key': k, 'value': v})
+            # Reformat for CKAN
+            dataset['extras'] = [{'key': k, 'value': v} for k, v in extras_dict.items()]
 
-            # Assign updated extras back to the resource
-            dataset['extras'] = new_extras_list
-
-            # Save the updated dataset
+            # Save updates
             package_update({'ignore_auth': True}, dataset)
 
         except Exception as e:
-            # Log and re-raise exceptions for error reporting
             log.error(f"Error storing text in JSON: {str(e)}")
             raise
+
+    def _upload_to_ckan(self, file_path, dataset_id):
+        """
+        Uploads a text file to CKAN as a resource.
+        """
+        try:
+            url = "http://localhost:5000/api/3/action/resource_create"
+
+            # Determine mimetype
+            mimetype, _ = mimetypes.guess_type(file_path)
+            if mimetype is None:
+                mimetype = "text/plain"  # Default to plain text
+
+            log.info(f"Uploading file: {file_path} with mimetype: {mimetype}")
+            headers = {
+                "Authorization": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiIzRF9qWkY2anpNRVFlbjVqRWxNOTBOUDNLNGlxUEFvX20xVnhQLVYxem1FIiwiaWF0IjoxNzQ4ODg3MjIzfQ.f4kveIh6FtinK0xotxZ65O_9mPfcVLPWeCPrMHZvtfk"
+            }
+            data = {"package_id": dataset_id, "name": os.path.basename(file_path),  "format": "txt",
+                    "mimetype": f"{mimetype}; charset=utf-8" }
+
+            log.info(f"Uploading file: {file_path}")
+
+            # Ensure the file is closed properly
+            with open(file_path, "rb") as file:
+                files = {
+                    "upload": (os.path.basename(file_path), file, f"{mimetype}; charset=utf-8")
+                }
+                response = requests.post(url, headers=headers, data=data, files=files, timeout=10)
+
+            log.info(f"Response Status: {response.status_code}")
+            log.info(f"Response Text: {response.text}")
+
+            result = response.json()
+
+            if result.get("success"):
+                log.info(f"Successfully uploaded {file_path} to CKAN dataset {dataset_id}")
+                return result["result"]["id"]
+            else:
+                log.error(f"Failed to upload {file_path}: {result}")
+                return None
+
+        except requests.exceptions.Timeout:
+            log.error("Request to CKAN timed out.")
+            return None
+        except requests.exceptions.RequestException as e:
+            log.error(f"Request failed: {e}")
+            return None
+        except Exception as e:
+            log.error(f"Error uploading to CKAN: {e}")
+            return None
+
+    def _store_text_as_txt(self, text_content, filename):
+        """
+        Save extracted text as a .txt file in a temporary file path.
+        """
+        try:
+            file_path = f"/tmp/{filename}.txt"
+            with open(file_path, "w", encoding="utf-8") as file:
+                file.write(text_content)
+            return file_path
+        except Exception as e:
+            log.error(f"Error saving text to file {filename}: {e}")
+            return None
