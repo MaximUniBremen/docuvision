@@ -150,10 +150,10 @@ class DocuvisionPlugin(plugins.SingletonPlugin):
         elif fmt in ("jpeg", "png", "tiff", "bmp", "gif"):
             extracted_text = self._extract_text_image(filepath)
         else:
-            log.error(
+            log.info(
                 f"Unsupported format for text extraction: format field='{resource.get('format')}', resolved fmt='{fmt}', resource={resource}"
             )
-            raise Exception(f"Unsupported format for text extraction: {fmt}")
+            return
 
         self._store_text_in_json(resource["id"], extracted_text)
         log.info(f"Successfully processed {fmt} for resource {resource['id']}")
@@ -185,7 +185,7 @@ class DocuvisionPlugin(plugins.SingletonPlugin):
         First try textract (requires antiword/catdoc), then fallback to antiword directly.
         """
         try:
-            import textract  # pip install textract
+            import textract
 
             try:
                 text_bytes = textract.process(filepath)
@@ -239,7 +239,7 @@ class DocuvisionPlugin(plugins.SingletonPlugin):
             )
         # Fallback to xlrd if openpyxl fails (maybe it's actually an .xls file or old Excel format)
         try:
-            import xlrd  # pip install xlrd
+            import xlrd
 
             wb = xlrd.open_workbook(filepath)
             text = ""
