@@ -1,54 +1,114 @@
 import logging
 import json
+import mimetypes
 import os
 from datetime import datetime
 import subprocess
 
 import ckan.plugins as plugins
 import ckan.plugins.toolkit as toolkit
+import requests
 from ckan.lib.uploader import ResourceUpload
 import PyPDF2
-
 from docx import Document
 import openpyxl
 from PIL import Image
 import pytesseract
 
+# Create a logger for logging information and errors
 log = logging.getLogger(__name__)
 
 
 class DocuvisionPlugin(plugins.SingletonPlugin):
-    plugins.implements(plugins.IConfigurer)
-    plugins.implements(plugins.IResourceController)
-    plugins.implements(plugins.IActions)
+    """
+    DocuvisionPlugin for processing PDF resources in CKAN.
 
+    Implements:
+    - IConfigurer: Allows adding custom templates, public resources, and fanstatic.
+    - IResourceController: Hooks into resource creation/update events.
+    - IActions: Defines a custom CKAN action API endpoint (docuvision_process_pdf).
+    """
+
+    # Register plugin interfaces
+    plugins.implements(plugins.IConfigurer)          # For configuring CKAN (templates, public files, etc.)
+    plugins.implements(plugins.IResourceController)  # Monitor and modify resource lifecycle events
+    plugins.implements(plugins.IActions)             # Register custom actions in the CKAN API
+
+    # --------------------------------------------------------------------------
+    # IConfigurer
+    # --------------------------------------------------------------------------
     def update_config(self, config_):
+        """
+        Called when CKAN loads this plugin to update or add configuration items.
+        Here we add the plugin's templates, public files, and fanstatic resources.
+        """
+        # Add template directory so CKAN can find custom templates
         toolkit.add_template_directory(config_, "templates")
+        # Add public directory for static files (images, CSS, etc.)
         toolkit.add_public_directory(config_, "public")
+        # Register fanstatic resources (CSS/JS) to be served by CKAN
         toolkit.add_resource("fanstatic", "docuvision")
 
+    # --------------------------------------------------------------------------
+    # IResourceController - required methods
+    # --------------------------------------------------------------------------
     def before_resource_create(self, context, resource):
+        """
+        Triggered right before a resource is created.
+        Currently no specific action is taken here.
+        """
         pass
 
     def after_resource_create(self, context, resource):
+        """
+        Triggered right after a resource is created.
+        Checks if resource is a PDF; if so, calls _process_pdf for text extraction.
+        """
         self._process_resource(resource)
 
     def before_resource_update(self, context, current, resource):
+        """
+        Triggered before a resource is updated.
+        Currently no specific action is taken here.
+        """
         pass
 
     def after_resource_update(self, context, resource):
+        """
+        Triggered right after a resource is updated.
+        """
         self._process_resource(resource)
 
     def before_resource_delete(self, context, resource, resources):
+        """
+        Triggered before a resource is deleted.
+        Currently no specific action is taken here.
+        """
         pass
 
     def after_resource_delete(self, context, resources):
+        """
+        Triggered right after a resource is deleted.
+        Currently no specific action is taken here.
+        """
         pass
 
     def before_resource_show(self, resource_dict):
-        return resource_dict
+        """
+        Triggered before showing resource details to the user.
+        Any modifications to resource_dict here will affect the displayed or returned data.
+        """
+        return resource_dict  # Returning unmodified resource_dict
+
+    # --------------------------------------------------------------------------
+    # IActions - Custom CKAN Action API endpoints
+    # --------------------------------------------------------------------------
 
     def get_actions(self):
+        """
+        Returns a dict mapping action names to functions.
+        This makes the defined actions available via CKAN's action API.
+        """
         return {
             "docuvision_process_document": lambda context, data_dict: self.docuvision_process_document(
                 context, data_dict
@@ -56,10 +116,17 @@ class DocuvisionPlugin(plugins.SingletonPlugin):
         }
 
     def docuvision_process_document(self, context, data_dict):
+        """
+        CKAN action: /api/3/action/docuvision_process_document
+        Expects JSON data containing "resource_id" of the resource.
+        Performs PDF text extraction and updates the resource with extracted information.
+        """
+        # Validate the required param 'resource_id'
         resource_id = data_dict.get("resource_id")
         if not resource_id:
             raise toolkit.ValidationError("Missing 'resource_id' in request data.")
 
+        # Look up the resource in CKAN by ID
         try:
             resource = toolkit.get_action("resource_show")(
                 {"ignore_auth": True}, {"id": resource_id}
@@ -69,6 +136,7 @@ class DocuvisionPlugin(plugins.SingletonPlugin):
         except Exception as e:
             raise toolkit.ValidationError(f"Error fetching resource: {str(e)}")
 
+        # Process the resource and return success if extraction runs smoothly
         try:
             self._process_resource(resource)
             return {
@@ -78,6 +146,7 @@ class DocuvisionPlugin(plugins.SingletonPlugin):
         except Exception as e:
             raise toolkit.ValidationError(f"Error processing document: {str(e)}")
 
+    # By default, CKAN logs action usage for auditing. This exempts it from auditing.
     docuvision_process_document.auth_audit_exempt = True
 
     # --------------------------------------------------------------------------
@@ -161,8 +230,10 @@ class DocuvisionPlugin(plugins.SingletonPlugin):
     def _extract_text_pdf(self, filepath):
         text = ""
         try:
+            # Open PDF in read-binary mode
             with open(filepath, "rb") as file:
                 pdf_reader = PyPDF2.PdfReader(file)
+                # Loop through each page to extract text
                 for page in pdf_reader.pages:
                     text += (page.extract_text() or "") + "\n"
             return text
@@ -297,7 +368,9 @@ class DocuvisionPlugin(plugins.SingletonPlugin):
             resource = resource_show({"ignore_auth": True}, {"id": resource_id})
             dataset_id = resource["package_id"]
 
-            # Fetch the current state of the dataset
+            filename = dataset_id + resource_id
+
+            # Fetch the current dataset object
             dataset = package_show({"ignore_auth": True}, {"id": dataset_id})
 
             # Create "extras" field in the JSON if it doesn't exist yet
@@ -309,8 +382,19 @@ class DocuvisionPlugin(plugins.SingletonPlugin):
             for extra_item in dataset.get("extras", []):
                 extras_dict[extra_item["key"]] = extra_item["value"]
 
+            # Save each text extraction to a file and upload it to CKAN
+            file_resources = {}
+            if text:
+                file_path = self._store_text_as_txt(text, filename)
+                log.info(file_path)
+                if file_path:
+                    uploaded_resource_id = self._upload_to_ckan(file_path, dataset_id)
+                    if uploaded_resource_id:
+                        file_resources[filename] = uploaded_resource_id
+
             # Build JSON structure to store extracted text and metadata
             text_data = {
+                "text_length": str(len(text)),
                 "extracted_text": text,
                 "extraction_date": datetime.utcnow().isoformat(),
                 "version": "1.1",
@@ -331,6 +415,68 @@ class DocuvisionPlugin(plugins.SingletonPlugin):
             package_update({"ignore_auth": True}, dataset)
 
         except Exception as e:
-            # Log and re-raise exceptions for error reporting
             log.error(f"Error storing text in JSON: {str(e)}")
             raise
+
+    def _upload_to_ckan(self, file_path, dataset_id):
+        """
+        Uploads a text file to CKAN as a resource.
+        """
+        try:
+            url = "http://localhost:5000/api/3/action/resource_create"
+
+            # Determine mimetype
+            mimetype, _ = mimetypes.guess_type(file_path)
+            if mimetype is None:
+                mimetype = "text/plain"  # Default to plain text
+
+            log.info(f"Uploading file: {file_path} with mimetype: {mimetype}")
+            headers = {
+                "Authorization": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiIzRF9qWkY2anpNRVFlbjVqRWxNOTBOUDNLNGlxUEFvX20xVnhQLVYxem1FIiwiaWF0IjoxNzQ4ODg3MjIzfQ.f4kveIh6FtinK0xotxZ65O_9mPfcVLPWeCPrMHZvtfk"
+            }
+            data = {"package_id": dataset_id, "name": os.path.basename(file_path),  "format": "txt",
+                    "mimetype": f"{mimetype}; charset=utf-8" }
+
+            log.info(f"Uploading file: {file_path}")
+
+            # Ensure the file is closed properly
+            with open(file_path, "rb") as file:
+                files = {
+                    "upload": (os.path.basename(file_path), file, f"{mimetype}; charset=utf-8")
+                }
+                response = requests.post(url, headers=headers, data=data, files=files, timeout=10)
+
+            log.info(f"Response Status: {response.status_code}")
+            log.info(f"Response Text: {response.text}")
+
+            result = response.json()
+
+            if result.get("success"):
+                log.info(f"Successfully uploaded {file_path} to CKAN dataset {dataset_id}")
+                return result["result"]["id"]
+            else:
+                log.error(f"Failed to upload {file_path}: {result}")
+                return None
+
+        except requests.exceptions.Timeout:
+            log.error("Request to CKAN timed out.")
+            return None
+        except requests.exceptions.RequestException as e:
+            log.error(f"Request failed: {e}")
+            return None
+        except Exception as e:
+            log.error(f"Error uploading to CKAN: {e}")
+            return None
+
+    def _store_text_as_txt(self, text_content, filename):
+        """
+        Save extracted text as a .txt file in a temporary file path.
+        """
+        try:
+            file_path = f"/tmp/{filename}.txt"
+            with open(file_path, "w", encoding="utf-8") as file:
+                file.write(text_content)
+            return file_path
+        except Exception as e:
+            log.error(f"Error saving text to file {filename}: {e}")
+            return None
