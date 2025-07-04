@@ -29,9 +29,10 @@ setup(
         "PyPDF2>=3.0.0",      # For PDF text extraction
         "pillow>=9.0.0",      # For advanced OCR image processing if needed
         "pytesseract>=0.3.8", # For OCR functionality
-        "flask_sqlalchemy>=3.1.1", "sqlalchemy>=2.0.38", "psycopg2-binary>=2.9.10" # For Postgres database functionality
         "ckan>=2.11",  # Tested, or higher if you plan to support CKAN 2.12+
         "PyPDF2>=3.0.0",  # For PDF text extraction
+        "pdf2image>=1.17.0",
+        "opencv-python-headless>=4.11.0.86",
         "pillow>=9.0.0",  # For advanced OCR image processing if needed
         "pytesseract>=0.3.8",  # For OCR functionality
         "flask_sqlalchemy>=3.1.1",
@@ -40,7 +41,7 @@ setup(
         "python-docx>=1.2.0",
         "et-xmlfile>=2.0.0",
         "openpyxl>=3.1.5",
-        "xlrd>=2.0.2",  # For additional document types support
+        "xlrd>=2.0.2"  # For additional document types support
     ],
     # CKAN plugin entry point
     entry_points="""

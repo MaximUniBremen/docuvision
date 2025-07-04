@@ -1,3 +1,5 @@
+
+
 FROM ckan/ckan-dev:2.11
 
 # Install any extensions needed by your CKAN instance
@@ -41,12 +43,37 @@ COPY --chown=ckan-sys:ckan-sys docker-entrypoint.d/* /docker-entrypoint.d/
 # runtime mounted ones)
 COPY --chown=ckan-sys:ckan-sys patches ${APP_DIR}/patches
 
+# Switch to root to install system dependencies
+USER root
+
+# --- SYSTEM DEPENDENCIES ---
+RUN apt-get update && \
+  apt-get install -y --no-install-recommends \
+      tesseract-ocr \
+      libtesseract-dev \
+      libleptonica-dev \
+      poppler-utils \
+      antiword \
+      catdoc \
+      unoconv \
+      python3-pip \
+      libjpeg-dev \
+      libpng-dev \
+      libopenjp2-7 \
+      ghostscript \
+  && apt-get clean && rm -rf /var/lib/apt/lists/*
+  
+RUN  pip install --upgrade pip==24.0
+RUN  pip install textract
+RUN  pip install --upgrade pip
+
 USER ckan
 
 RUN for d in $APP_DIR/patches/*; do \
-        if [ -d $d ]; then \
-            for f in `ls $d/*.patch | sort -g`; do \
-                cd $SRC_DIR/`basename "$d"` && echo "$0: Applying patch $f to $SRC_DIR/`basename $d`"; patch -p1 < "$f" ; \
-            done ; \
-        fi ; \
-    done
+       if [ -d $d ]; then \
+           for f in `ls $d/*.patch | sort -g`; do \
+               cd $SRC_DIR/`basename "$d"` && echo "$0: Applying patch $f to $SRC_DIR/`basename $d`"; patch -p1 < "$f" ; \
+           done ; \
+       fi ; \
+   done
+

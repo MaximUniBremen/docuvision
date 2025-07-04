@@ -4,12 +4,13 @@ import mimetypes
 import os
 from datetime import datetime
 import subprocess
-
+import cv2
 import ckan.plugins as plugins
 import ckan.plugins.toolkit as toolkit
 import requests
 from ckan.lib.uploader import ResourceUpload
 import PyPDF2
+from pdf2image import convert_from_path
 from docx import Document
 import openpyxl
 from PIL import Image
@@ -236,10 +237,35 @@ class DocuvisionPlugin(plugins.SingletonPlugin):
                 # Loop through each page to extract text
                 for page in pdf_reader.pages:
                     text += (page.extract_text() or "") + "\n"
+            if len(text)<5:
+                text = self._extract_text_tesseract(filepath)
             return text
         except Exception as e:
             log.error(f"Error extracting text from PDF: {str(e)}")
             raise
+
+    def _extract_text_tesseract(self, filepath):
+        """
+        Reads the PDF at the given filepath and returns extracted text as a string.
+        """
+        try:
+            # Convert PDF pages to images
+            images = convert_from_path(filepath, poppler_path="/usr/bin")
+            extracted_text = []
+
+            for i, image in enumerate(images):
+                # Convert PIL image to RGB just to be sure
+                img_rgb = image.convert("RGB")
+
+                # Use pytesseract to extract text
+                text = pytesseract.image_to_string(img_rgb)
+                extracted_text.append(text)
+
+            return "\n".join(extracted_text)
+
+        except Exception as e:
+            print(f"Error extracting text: {e}")
+            return ""
 
     def _extract_text_docx(self, filepath):
         try:
@@ -368,7 +394,7 @@ class DocuvisionPlugin(plugins.SingletonPlugin):
             resource = resource_show({"ignore_auth": True}, {"id": resource_id})
             dataset_id = resource["package_id"]
 
-            filename = dataset_id + resource_id
+            filename = resource_id
 
             # Fetch the current dataset object
             dataset = package_show({"ignore_auth": True}, {"id": dataset_id})
@@ -432,7 +458,7 @@ class DocuvisionPlugin(plugins.SingletonPlugin):
 
             log.info(f"Uploading file: {file_path} with mimetype: {mimetype}")
             headers = {
-                "Authorization": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiIzRF9qWkY2anpNRVFlbjVqRWxNOTBOUDNLNGlxUEFvX20xVnhQLVYxem1FIiwiaWF0IjoxNzQ4ODg3MjIzfQ.f4kveIh6FtinK0xotxZ65O_9mPfcVLPWeCPrMHZvtfk"
+                "Authorization": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJqV3p6UHN4ZXdfaHZjZDI2elhBbDlpMmZEeW1EWVhBZ1k4dVVCc1UzV1dZIiwiaWF0IjoxNzUxNjE3NTMzfQ.Y2mEqDl_Tir8loe1nS3mw1E-QvV09kzas6x6WVkhLCg"
             }
             data = {"package_id": dataset_id, "name": os.path.basename(file_path),  "format": "txt",
                     "mimetype": f"{mimetype}; charset=utf-8" }
